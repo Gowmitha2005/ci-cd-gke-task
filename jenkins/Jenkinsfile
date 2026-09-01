@@ -18,12 +18,9 @@ pipeline {
     environment {
         PROJECT_ID = 'poised-legend-472201-g0'
         REGION = 'asia-south1'
-
         REPOSITORY = 'gowmitha-ci-cd-repo'
         APP_NAME = 'ci-cd-gke-task'
-
         CLUSTER_NAME = 'gowmitha-cluster-1'
-
         GCP_CREDENTIALS = 'jenkins-gcp'
     }
 
@@ -137,15 +134,41 @@ pipeline {
                 echo 'Deploying application to GKE...'
 
                 sh """
-                    gcloud container clusters get-credentials \
-                    ${CLUSTER_NAME} \
+                    gcloud container clusters get-credentials ${CLUSTER_NAME} \
                     --region ${REGION} \
                     --project ${PROJECT_ID}
                 """
 
-                sh 'kubectl get nodes'
+                echo 'Applying Kubernetes manifests...'
 
-                echo 'GKE deployment stage is ready.'
+                sh '''
+                    kubectl apply -f kubernetes/deployment.yaml
+                    kubectl apply -f kubernetes/service.yaml
+                '''
+
+                echo "Updating GKE deployment with image tag: ${FINAL_IMAGE_TAG}"
+
+                sh """
+                    kubectl set image deployment/${APP_NAME} \
+                    ${APP_NAME}=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${FINAL_IMAGE_TAG}
+                """
+
+                echo 'Waiting for Kubernetes rollout...'
+
+                sh """
+                    kubectl rollout status deployment/${APP_NAME} \
+                    --timeout=180s
+                """
+
+                echo 'Verifying Kubernetes deployment...'
+
+                sh """
+                    kubectl get deployment ${APP_NAME}
+                    kubectl get pods
+                    kubectl get service ${APP_NAME}-service
+                """
+
+                echo 'Application successfully deployed to GKE!'
             }
         }
     }
