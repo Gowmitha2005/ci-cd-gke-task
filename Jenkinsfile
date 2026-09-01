@@ -57,6 +57,32 @@ pipeline {
             }
         }
 
+        stage('Test GKE Access') {
+          steps {
+            echo 'Testing Jenkins access to GKE...'
+
+            withCredentials([
+              file(
+                credentialsId: 'jenkins-gcp',
+                variable: 'GCP_KEY'
+              )
+            ]) {
+                sh '''
+                gcloud auth activate-service-account \
+                    --key-file="$GCP_KEY"
+
+                gcloud config set project "$PROJECT_ID"
+
+                gcloud container clusters get-credentials \
+                    gowmitha-cluster-1 \
+                    --region asia-south1 \
+                    --project "$PROJECT_ID"
+
+                kubectl get nodes
+                '''
+            }
+        }
+
         stage('Configure Docker for Artifact Registry') {
             steps {
                 echo 'Configuring Docker authentication for Artifact Registry...'
