@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ci-cd-gke-task
+  labels:
+    app: ci-cd-gke-task
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ci-cd-gke-task
+  template:
+    metadata:
+      labels:
+        app: ci-cd-gke-task
+    spec:
+      containers:
+        - name: ci-cd-gke-task
+          image: asia-south1-docker.pkg.dev/poised-legend-472201-g0/gowmitha-ci-cd-repo/ci-cd-gke-task:7
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
