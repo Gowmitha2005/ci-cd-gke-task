@@ -4,6 +4,12 @@ pipeline {
     environment {
         APP_NAME = 'ci-cd-gke-task'
         IMAGE_TAG = "${BUILD_NUMBER}"
+
+        PROJECT_ID = 'poised-legend-472201-g0'
+        REGION = 'asia-south1'
+        REPOSITORY = 'gowmitha-ci-cd-repo'
+
+        IMAGE_URI = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${IMAGE_TAG}"
     }
 
     stages {
@@ -35,11 +41,57 @@ pipeline {
                 sh 'docker build -t ${APP_NAME}:${IMAGE_TAG} .'
             }
         }
+
+        stage('Authenticate with GCP') {
+            steps {
+                echo 'Authenticating Jenkins with Google Cloud...'
+
+                withCredentials([file(credentialsId: 'jenkins-gcp', variable: 'GCP_KEY')]) {
+                    sh '''
+                        gcloud auth activate-service-account \
+                            --key-file="$GCP_KEY"
+
+                        gcloud config set project "$PROJECT_ID"
+                    '''
+                }
+            }
+        }
+
+        stage('Configure Docker for Artifact Registry') {
+            steps {
+                echo 'Configuring Docker authentication for Artifact Registry...'
+
+                sh '''
+                    gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+                '''
+            }
+        }
+
+        stage('Tag Docker Image') {
+            steps {
+                echo 'Tagging Docker image for Artifact Registry...'
+
+                sh '''
+                    docker tag ${APP_NAME}:${IMAGE_TAG} ${IMAGE_URI}
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                echo 'Pushing Docker image to Artifact Registry...'
+
+                sh '''
+                    docker push ${IMAGE_URI}
+                '''
+            }
+        }
     }
 
     post {
         success {
             echo 'Pipeline completed successfully!'
+            echo "Docker image pushed: ${IMAGE_URI}"
         }
 
         failure {
