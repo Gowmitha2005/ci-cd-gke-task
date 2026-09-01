@@ -1,15 +1,30 @@
 pipeline {
     agent any
 
-    environment {
-        APP_NAME = 'ci-cd-gke-task'
-        IMAGE_TAG = "${BUILD_NUMBER}"
+    parameters {
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: '',
+            description: 'Docker image tag. Leave empty to use BUILD_NUMBER.'
+        )
 
+        booleanParam(
+            name: 'DEPLOY_TO_GKE',
+            defaultValue: true,
+            description: 'Deploy the application to GKE'
+        )
+    }
+
+    environment {
         PROJECT_ID = 'poised-legend-472201-g0'
         REGION = 'asia-south1'
-        REPOSITORY = 'gowmitha-ci-cd-repo'
 
-        IMAGE_URI = "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${IMAGE_TAG}"
+        REPOSITORY = 'gowmitha-ci-cd-repo'
+        APP_NAME = 'ci-cd-gke-task'
+
+        CLUSTER_NAME = 'gowmitha-cluster-1'
+
+        GCP_CREDENTIALS = 'jenkins-gcp'
     }
 
     stages {
@@ -37,8 +52,20 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo 'Building Docker image...'
-                sh 'docker build -t ${APP_NAME}:${IMAGE_TAG} .'
+                script {
+                    def tag = params.IMAGE_TAG?.trim()
+                        ? params.IMAGE_TAG.trim()
+                        : env.BUILD_NUMBER
+
+                    env.FINAL_IMAGE_TAG = tag
+
+                    echo "Building Docker image with tag: ${env.FINAL_IMAGE_TAG}"
+
+                    sh """
+                        docker build \
+                        -t ${APP_NAME}:${FINAL_IMAGE_TAG} .
+                    """
+                }
             }
         }
 
@@ -46,51 +73,33 @@ pipeline {
             steps {
                 echo 'Authenticating Jenkins with Google Cloud...'
 
-                withCredentials([file(credentialsId: 'jenkins-gcp', variable: 'GCP_KEY')]) {
-                    sh '''
+                withCredentials([
+                    file(
+                        credentialsId: "${GCP_CREDENTIALS}",
+                        variable: 'GCP_KEY'
+                    )
+                ]) {
+                    sh """
                         gcloud auth activate-service-account \
-                            --key-file="$GCP_KEY"
+                        --key-file="\$GCP_KEY"
 
-                        gcloud config set project "$PROJECT_ID"
-                    '''
+                        gcloud config set project ${PROJECT_ID}
+
+                        gcloud auth list
+                    """
                 }
             }
         }
-
-        stage('Test GKE Access') {
-          steps {
-            echo 'Testing Jenkins access to GKE...'
-
-            withCredentials([
-              file(
-                credentialsId: 'jenkins-gcp',
-                variable: 'GCP_KEY'
-              )
-            ]) {
-                sh '''
-                gcloud auth activate-service-account \
-                    --key-file="$GCP_KEY"
-
-                gcloud config set project "$PROJECT_ID"
-
-                gcloud container clusters get-credentials \
-                    gowmitha-cluster-1 \
-                    --region asia-south1 \
-                    --project "$PROJECT_ID"
-
-                kubectl get nodes
-                '''
-            }
-        }
-    
 
         stage('Configure Docker for Artifact Registry') {
             steps {
                 echo 'Configuring Docker authentication for Artifact Registry...'
 
-                sh '''
-                    gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
-                '''
+                sh """
+                    gcloud auth configure-docker \
+                    ${REGION}-docker.pkg.dev \
+                    --quiet
+                """
             }
         }
 
@@ -98,9 +107,11 @@ pipeline {
             steps {
                 echo 'Tagging Docker image for Artifact Registry...'
 
-                sh '''
-                    docker tag ${APP_NAME}:${IMAGE_TAG} ${IMAGE_URI}
-                '''
+                sh """
+                    docker tag \
+                    ${APP_NAME}:${FINAL_IMAGE_TAG} \
+                    ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${FINAL_IMAGE_TAG}
+                """
             }
         }
 
@@ -108,17 +119,46 @@ pipeline {
             steps {
                 echo 'Pushing Docker image to Artifact Registry...'
 
-                sh '''
-                    docker push ${IMAGE_URI}
-                '''
+                sh """
+                    docker push \
+                    ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${FINAL_IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('Deploy to GKE') {
+            when {
+                expression {
+                    return params.DEPLOY_TO_GKE
+                }
+            }
+
+            steps {
+                echo 'Deploying application to GKE...'
+
+                sh """
+                    gcloud container clusters get-credentials \
+                    ${CLUSTER_NAME} \
+                    --region ${REGION} \
+                    --project ${PROJECT_ID}
+                """
+
+                sh 'kubectl get nodes'
+
+                echo 'GKE deployment stage is ready.'
             }
         }
     }
 
     post {
+
         success {
-            echo 'Pipeline completed successfully!'
-            echo "Docker image pushed: ${IMAGE_URI}"
+            echo "Pipeline completed successfully!"
+
+            echo """
+            Docker image pushed:
+            ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${APP_NAME}:${FINAL_IMAGE_TAG}
+            """
         }
 
         failure {
