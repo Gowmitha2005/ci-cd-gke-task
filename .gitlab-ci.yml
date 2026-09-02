@@ -1,0 +1,40 @@
+stages:
+  - build
+  - test
+  - deploy
+
+build:
+  stage: build
+  image: node:24
+
+  cache:
+    key: npm-cache
+    paths:
+      - .npm/
+
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - echo "Build completed"
+
+  artifacts:
+    paths:
+      - node_modules/
+    expire_in: 1 hour
+
+
+test:
+  stage: test
+  image: node:24
+
+  dependencies:
+    - build
+
+  script:
+    - npm test
+
+
+deploy:
+  stage: deploy
+
+  script:
+    - echo "Deployment stage"
